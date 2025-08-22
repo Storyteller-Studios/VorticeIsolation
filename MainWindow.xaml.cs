@@ -20,91 +20,68 @@ namespace VorticeIsolation
     /// </summary>
     public partial class MainWindow : Window
     {
-        private IDirect3DTexture9 _renderTarget;
+        private ID3D11Texture2D _renderTarget;
+        private IDXGISurface _surface;
+        private ID2D1Bitmap _bitmap;
+        private IDirect3DTexture9 _renderTarget9;
         private ID2D1DeviceContext _d2DeviceContext;
+        private ID3D11Device _d3D11Device;
+        private IDirect3D9Ex _d3D9ContextEx;
+        private IDirect3DDevice9Ex _d3D9DeviceEx;
         private ID2D1Factory1 _factory;
         private ID2D1Effect _effect;
-        private Stopwatch Stopwatch = Stopwatch.StartNew();
-        private ID3D11Device _d3D11Device;
+        private Stopwatch _stopwatch = Stopwatch.StartNew();
+
+        private bool _reLoading = false;
+        private bool _startup = true;
+        private float multiplier = 0.5f;
 
         public MainWindow()
         {
             InitializeComponent();
             Loaded += MainWindow_Loaded;
+            SizeChanged += MainWindow_SizeChanged;
+        }
+
+        private void MainWindow_SizeChanged(object sender, SizeChangedEventArgs e)
+        {
+            if (_startup) 
+            {
+                return;
+            }
+            _effect?.SetValue(4, (float)Grid.ActualWidth * multiplier);
+            _effect?.SetValue(5, (float)Grid.ActualHeight * multiplier);
+            InitializeDirectXSurface((uint)(Grid.ActualWidth * multiplier), (uint)(Grid.ActualHeight * multiplier));
         }
 
         private void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
-            var width = 1280u;
-            var height = 720u;
-
-            ID3D11Device device =
-                D3D11.D3D11CreateDevice(Vortice.Direct3D.DriverType.Hardware, DeviceCreationFlags.BgraSupport);
-            _d3D11Device = device;
-
-            var desc = new Texture2DDescription()
-            {
-                BindFlags = BindFlags.RenderTarget | BindFlags.ShaderResource,
-                Format = Format.B8G8R8A8_UNorm,
-                Width = width,
-                Height = height,
-                MipLevels = 1,
-                SampleDescription = new SampleDescription(1, 0),
-                Usage = ResourceUsage.Default,
-                MiscFlags = ResourceOptionFlags.Shared,
-                CPUAccessFlags = CpuAccessFlags.None,
-                ArraySize = 1
-            };
-            var renderTarget = device.CreateTexture2D(desc);
-
-            var surface = renderTarget.QueryInterface<IDXGISurface>();
-            IDXGIDevice dXGIDevice = device.QueryInterface<IDXGIDevice>();
-            var d2dFactory = D2D1.D2D1CreateFactory<ID2D1Factory1>();
-            _factory = d2dFactory;
-            var d2Device = d2dFactory.CreateDevice(dXGIDevice);
-            d2dFactory.RegisterEffect<IsolationEffect>();
-            var context = d2Device.CreateDeviceContext();
-            _d2DeviceContext = context;
-
-            var id = context.CreateEffect(typeof(IsolationEffect).GUID);
-            _effect = id.As<ID2D1Effect>();
-            var bitmap = context.CreateBitmapFromDxgiSurface(surface);
-            context.Target = bitmap;
-            SetRenderTarget(renderTarget);
-            device.ImmediateContext.RSSetViewport(0, 0, 1280, 720);
-
+            _startup = true;
+            InitializeDirectXDevice();
+            InitializeDirectXSurface((uint)(Grid.ActualWidth * multiplier), (uint)(Grid.ActualHeight * multiplier));
+            _effect?.SetValue(4, (float)Grid.ActualWidth * multiplier);
+            _effect?.SetValue(5, (float)Grid.ActualHeight * multiplier);
             CompositionTarget.Rendering += CompositionTarget_Rendering;
+            _startup = false;
         }
 
         private void CompositionTarget_Rendering(object? sender, EventArgs e)
         {
+            if (_reLoading) 
+            {
+                return;
+            }
             _d2DeviceContext.BeginDraw();
             _d2DeviceContext.Clear(null);
-            _effect.SetValue(0, (float)Stopwatch.Elapsed.TotalSeconds);
+            _effect.SetValue(3, (float)_stopwatch.Elapsed.TotalSeconds);
             _d2DeviceContext.DrawImage(_effect);
             _d2DeviceContext.EndDraw();
             _d3D11Device.ImmediateContext.Flush();
             D3DImage.Lock();
-
-            D3DImage.AddDirtyRect(new Int32Rect(0, 0, 1280, 720));
+            D3DImage.AddDirtyRect(new Int32Rect(0, 0, (int)(Grid.ActualWidth * multiplier), (int)(Grid.ActualHeight * multiplier)));
             D3DImage.Unlock();
 
             Image.InvalidateVisual();
-        }
-
-        private static Vortice.Direct3D9.Format TranslateFormat(ID3D11Texture2D texture)
-        {
-            switch (texture.Description.Format)
-            {
-                case Format.R10G10B10A2_UNorm:
-                    return Vortice.Direct3D9.Format.A2B10G10R10;
-                case Format.R16G16B16A16_Float:
-                    return Vortice.Direct3D9.Format.A16B16G16R16F;
-                case Format.B8G8R8A8_UNorm:
-                    return Vortice.Direct3D9.Format.A8R8G8B8;
-                default:
-                    return Vortice.Direct3D9.Format.Unknown;
-            }
         }
 
         private IntPtr GetSharedHandle(ID3D11Texture2D texture)
@@ -120,7 +97,7 @@ namespace VorticeIsolation
             var presentParams = new Vortice.Direct3D9.PresentParameters();
 
             presentParams.Windowed = true;
-            presentParams.SwapEffect = Vortice.Direct3D9.SwapEffect.Copy;
+            presentParams.SwapEffect = Vortice.Direct3D9.SwapEffect.Flip;
             presentParams.DeviceWindowHandle = NativeMethods.GetDesktopWindow();
             presentParams.PresentationInterval = PresentInterval.Default;
             return presentParams;
@@ -128,28 +105,79 @@ namespace VorticeIsolation
 
         private void SetRenderTarget(ID3D11Texture2D target)
         {
-            var format = TranslateFormat(target);
+            var format = Vortice.Direct3D9.Format.A8R8G8B8;
             var handle = GetSharedHandle(target);
+
+            _renderTarget9?.Release();
+            _renderTarget9 = _d3D9DeviceEx.CreateTexture(target.Description.Width, target.Description.Height, 1,
+                Vortice.Direct3D9.Usage.RenderTarget, format, Pool.Default, ref handle);
+
+            using (var surface = _renderTarget9.GetSurfaceLevel(0))
+            {
+                D3DImage.Lock();
+                D3DImage.SetBackBuffer(D3DResourceType.IDirect3DSurface9, surface.NativePointer,
+                    enableSoftwareFallback: true);
+                D3DImage.AddDirtyRect(new Int32Rect(0, 0, (int)(Grid.ActualWidth * multiplier), (int)(Grid.ActualHeight * multiplier)));
+                D3DImage.Unlock();
+            }
+        }
+
+        private void InitializeDirectXDevice()
+        {
+            ID3D11Device device =
+                D3D11.D3D11CreateDevice(Vortice.Direct3D.DriverType.Hardware, DeviceCreationFlags.BgraSupport);
+            _d3D11Device = device;
+
+            IDXGIDevice dXGIDevice = device.QueryInterface<IDXGIDevice>();
+
+            var d2dFactory = D2D1.D2D1CreateFactory<ID2D1Factory1>();
+            _factory = d2dFactory;
+            var d2Device = d2dFactory.CreateDevice(dXGIDevice);
+            d2dFactory.RegisterEffect<IsolationEffect>();
+            var context = d2Device.CreateDeviceContext();
+            _d2DeviceContext = context;
+            var id = context.CreateEffect(typeof(IsolationEffect).GUID);
+            _effect?.Release();
+            _effect = id.As<ID2D1Effect>();
 
             var presentParams = GetPresentParameters();
             var createFlags = CreateFlags.HardwareVertexProcessing | CreateFlags.Multithreaded |
                               CreateFlags.FpuPreserve;
 
             var d3DContext = D3D9.Direct3DCreate9Ex();
+            _d3D9ContextEx = d3DContext;
             IDirect3DDevice9Ex d3DDevice =
-                d3DContext.CreateDeviceEx(0, DeviceType.Hardware, IntPtr.Zero, createFlags, presentParams);
+                _d3D9ContextEx.CreateDeviceEx(0, DeviceType.Hardware, IntPtr.Zero, createFlags, presentParams);
+            _d3D9DeviceEx = d3DDevice;
+        }
 
-            _renderTarget = d3DDevice.CreateTexture(target.Description.Width, target.Description.Height, 1,
-                Vortice.Direct3D9.Usage.RenderTarget, format, Pool.Default, ref handle);
-
-            using (var surface = _renderTarget.GetSurfaceLevel(0))
+        private void InitializeDirectXSurface(uint width, uint height)
+        {
+            _reLoading = true;
+            var desc = new Texture2DDescription()
             {
-                D3DImage.Lock();
-                D3DImage.SetBackBuffer(D3DResourceType.IDirect3DSurface9, surface.NativePointer,
-                    enableSoftwareFallback: true);
-                D3DImage.AddDirtyRect(new Int32Rect(0, 0, 1280, 720));
-                D3DImage.Unlock();
-            }
+                BindFlags = BindFlags.RenderTarget | BindFlags.ShaderResource,
+                Format = Format.B8G8R8A8_UNorm,
+                Width = width,
+                Height = height,
+                MipLevels = 1,
+                SampleDescription = new SampleDescription(1, 0),
+                Usage = ResourceUsage.Default,
+                MiscFlags = ResourceOptionFlags.Shared,
+                CPUAccessFlags = CpuAccessFlags.None,
+                ArraySize = 1
+            };
+            _renderTarget?.Release();
+            _renderTarget = _d3D11Device.CreateTexture2D(desc);
+
+            _surface?.Release();
+            _surface = _renderTarget.QueryInterface<IDXGISurface>();
+            var bitmap = _d2DeviceContext.CreateBitmapFromDxgiSurface(_surface);
+            _bitmap?.Release();
+            _bitmap = bitmap;
+            _d2DeviceContext.Target = bitmap;
+            SetRenderTarget(_renderTarget);
+            _reLoading = false;
         }
     }
 }
@@ -167,6 +195,7 @@ public class IsolationEffect : CustomEffectBase, ID2D1DrawTransform
         CurrentInstances.Add(this);
     }
     private ID2D1DrawInfo? drawInfo;
+    [CustomEffectProperty(PropertyType.Float, 0)]
     public float RandomValue1
     {
         get => Buffer.RandomValue1;
@@ -176,6 +205,7 @@ public class IsolationEffect : CustomEffectBase, ID2D1DrawTransform
             drawInfo?.SetPixelShaderConstantBuffer(Buffer);
         }
     }
+    [CustomEffectProperty(PropertyType.Float, 1)]
     public float RandomValue2
     {
         get => Buffer.RandomValue2;
@@ -185,6 +215,7 @@ public class IsolationEffect : CustomEffectBase, ID2D1DrawTransform
             drawInfo?.SetPixelShaderConstantBuffer(Buffer);
         }
     }
+    [CustomEffectProperty(PropertyType.Float, 2)]
     public float RandomValue3
     {
         get => Buffer.RandomValue3;
@@ -194,7 +225,7 @@ public class IsolationEffect : CustomEffectBase, ID2D1DrawTransform
             drawInfo?.SetPixelShaderConstantBuffer(Buffer);
         }
     }
-    [CustomEffectProperty(PropertyType.Float, 0)]
+    [CustomEffectProperty(PropertyType.Float, 3)]
     public float iTime
     {
         get => Buffer.iTime;
@@ -204,6 +235,7 @@ public class IsolationEffect : CustomEffectBase, ID2D1DrawTransform
             drawInfo?.SetPixelShaderConstantBuffer(Buffer);
         }
     }
+    [CustomEffectProperty(PropertyType.Float, 4)]
     public float Width
     {
         get => Buffer.Width;
@@ -213,6 +245,7 @@ public class IsolationEffect : CustomEffectBase, ID2D1DrawTransform
             drawInfo?.SetPixelShaderConstantBuffer(Buffer);
         }
     }
+    [CustomEffectProperty(PropertyType.Float, 5)]
     public float Height
     {
         get => Buffer.Height;
@@ -222,6 +255,7 @@ public class IsolationEffect : CustomEffectBase, ID2D1DrawTransform
             drawInfo?.SetPixelShaderConstantBuffer(Buffer);
         }
     }
+    [CustomEffectProperty(PropertyType.Bool, 6)]
     public bool EnableLightWave
     {
         get => Buffer.EnableLightWave;
@@ -231,6 +265,7 @@ public class IsolationEffect : CustomEffectBase, ID2D1DrawTransform
             drawInfo?.SetPixelShaderConstantBuffer(Buffer);
         }
     }
+    [CustomEffectProperty(PropertyType.Vector3, 7)]
     public Vector3 iResolution
     {
         get => Buffer.iResolution;
@@ -240,6 +275,7 @@ public class IsolationEffect : CustomEffectBase, ID2D1DrawTransform
             drawInfo?.SetPixelShaderConstantBuffer(Buffer);
         }
     }
+    [CustomEffectProperty(PropertyType.Vector3, 8)]
     public Vector3 Color1
     {
         get => Buffer.color1;
@@ -249,6 +285,7 @@ public class IsolationEffect : CustomEffectBase, ID2D1DrawTransform
             drawInfo?.SetPixelShaderConstantBuffer(Buffer);
         }
     }
+    [CustomEffectProperty(PropertyType.Vector3, 9)]
     public Vector3 Color2
     {
         get => Buffer.color2;
@@ -258,6 +295,7 @@ public class IsolationEffect : CustomEffectBase, ID2D1DrawTransform
             drawInfo?.SetPixelShaderConstantBuffer(Buffer);
         }
     }
+    [CustomEffectProperty(PropertyType.Vector3, 10)]
     public Vector3 Color3
     {
         get => Buffer.color3;
@@ -267,6 +305,7 @@ public class IsolationEffect : CustomEffectBase, ID2D1DrawTransform
             drawInfo?.SetPixelShaderConstantBuffer(Buffer);
         }
     }
+    [CustomEffectProperty(PropertyType.Vector3, 11)]
     public Vector3 Color4
     {
         get => Buffer.color4;
@@ -342,5 +381,4 @@ public class IsolationEffect : CustomEffectBase, ID2D1DrawTransform
         drawInfo.SetPixelShader(typeof(IsolationEffect).GUID, PixelOptions.None);
         this.drawInfo = drawInfo;
     }
-
 }
