@@ -11,7 +11,7 @@ cbuffer ConstantBuffer : register(b0)
     float3 color4 : packoffset(c4);
     float Width : packoffset(c4.w);
     float Height : packoffset(c5);
-    bool EnableLightWave : packoffset(c5.y);
+    bool UseHSVBlending : packoffset(c5.y);
 }
 float2x2 f_Rot(in float _a)
 {
@@ -59,10 +59,18 @@ float range(float val, float mi, float ma)
     return val * (ma - mi) + mi;
 }
 
-float smoothstep_custom(float edge0, float edge1, float x)
+float3 lerp_custom(float3 hsv1, float3 hsv2, float t)
 {
-    float t = saturate((x - edge0) / (edge1 - edge0));
-    return t * t * (3.0 - 2.0 * t);
+    float hueDiff = hsv2.x - hsv1.x;
+    if (hueDiff > 0.5)
+        hsv2.x -= 1.0;
+    else if (hueDiff < -0.5)
+        hsv2.x += 1.0;
+    float3 result;
+    result.x = lerp(hsv1.x, hsv2.x, t);
+    result.y = lerp(hsv1.y, hsv2.y, t);
+    result.z = lerp(hsv1.z, hsv2.z, t);
+    return result;
 }
 
 float4 main(
@@ -84,33 +92,30 @@ float4 main(
     float speed = (iTime * 0.75);
     tuv.x += (sin(((tuv.y * frequency) + speed)) / amplitude);
     tuv.y += (sin((((tuv.x * frequency) * 1.5) + speed)) / (amplitude * 0.5));
-    float3 layer1 = lerp(color1, color2, smoothstep_custom(-0.3, 0.2, mul(tuv, transpose(f_Rot(radians(-5.0)))).x));
-    float3 layer2 = lerp(color3, color4, smoothstep_custom(-0.3, 0.2, mul(tuv, transpose(f_Rot(radians(-5.0)))).x));
-    float3 finalComp = lerp(layer1, layer2, smoothstep_custom(0.5, -0.3, tuv.y));
-    if(EnableLightWave == false)
+    float3 c1,c2,c3,c4;
+    if(UseHSVBlending)
     {
-        return float4(finalComp, 1.0);
+        c1 = rgb2hsv(color1);
+        c2 = rgb2hsv(color2);
+        c3 = rgb2hsv(color3);
+        c4 = rgb2hsv(color4);
     }
     else
     {
-        float3 hsv = rgb2hsv(finalComp);
-
-        float2 p = -1.0 + 1.5 * uv.xy / iResolution.xy;
-        float t = iTime / 5.;
-
-        float x = p.x;
-        float y = p.y;
-
-        float mov0 = x+y+cos(sin(t)*2.0)*100.+sin(x/100.)*1000.;
-        float mov1 = y / 0.3 + t;
-        float mov2 = x / 0.2;
-
-        float c1 = sin(mov1+t + RandomValue1)/2.+mov2/2.-mov1-mov2+t;
-        float c2 = cos(c1+sin(mov0/1000.+t - RandomValue2)+sin(y/40.+t + RandomValue3)+sin((x+y)/100.)*3.);
-        float c3 = abs(sin(c2+cos(mov1+mov2+c2)+cos(mov2)+sin(x/1000.)));
-
-        float3 col = hsv2rgb(float3(range(abs(c2), hsv.x * 0.95, hsv.x), range(c3, hsv.y, hsv.y * 0.85), range(c3, hsv.z, hsv.z * 0.85)));
-        return float4(col, 1.0);    
+        c1 = color1;
+        c2 = color2;
+        c3 = color3;
+        c4 = color4;
     }
-
+    float3 layer1 = lerp(c1, c2, smoothstep(-0.3, 0.2, mul(tuv, transpose(f_Rot(radians(-5.0)))).x));
+    float3 layer2 = lerp(c3, c4, smoothstep(-0.3, 0.2, mul(tuv, transpose(f_Rot(radians(-5.0)))).x));
+    float3 finalComp = lerp(layer1, layer2, smoothstep(0.5, -0.3, tuv.y));
+    if(UseHSVBlending)
+    {
+        return float4(hsv2rgb(finalComp), 1.0);
+    }
+    else
+    {
+        return float4(finalComp, 1.0);
+    }
 } 

@@ -7,6 +7,7 @@ using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
 using Vortice;
+using Vortice.D3DCompiler;
 using Vortice.Direct2D1;
 using Vortice.Direct3D11;
 using Vortice.Direct3D9;
@@ -256,12 +257,12 @@ public class IsolationEffect : CustomEffectBase, ID2D1DrawTransform
         }
     }
     [CustomEffectProperty(PropertyType.Bool, 6)]
-    public bool EnableLightWave
+    public bool UseHSVBlending
     {
-        get => Buffer.EnableLightWave;
+        get => Buffer.UseHSVBlending;
         set
         {
-            Buffer.EnableLightWave = value;
+            Buffer.UseHSVBlending = value;
             drawInfo?.SetPixelShaderConstantBuffer(Buffer);
         }
     }
@@ -323,7 +324,7 @@ public class IsolationEffect : CustomEffectBase, ID2D1DrawTransform
         iTime = 0f,
         Width = 1280,
         Height = 720,
-        EnableLightWave = true,
+        UseHSVBlending = false,
         iResolution = new(1, 1, 1),
         color1 = new(0.192f, 0.384f, 0.933f),
         color2 = new(0.957f, 0.804f, 0.623f),
@@ -333,6 +334,10 @@ public class IsolationEffect : CustomEffectBase, ID2D1DrawTransform
 
     public override void Initialize(ID2D1EffectContext effectContext, ID2D1TransformGraph transformGraph)
     {
+        /*
+        var result = Compiler.CompileFromFile("effect.hlsl", "main", "ps_4_0");
+        File.WriteAllBytes("effect.ps", result.ToArray());
+        */
         var data = File.ReadAllBytes("effect.ps");
         effectContext.LoadPixelShader(typeof(IsolationEffect).GUID, data, (uint)data.Length);
         transformGraph.SetSingleTransformNode(this);
@@ -352,7 +357,7 @@ public class IsolationEffect : CustomEffectBase, ID2D1DrawTransform
         public Vector3 color4 { get; set; }
         public float Width { get; set; }
         public float Height { get; set; }
-        public bool EnableLightWave { get; set; }
+        public bool UseHSVBlending { get; set; }
     }
 
     public void MapOutputRectToInputRects(RawRect outputRect, RawRect[] inputRects)
