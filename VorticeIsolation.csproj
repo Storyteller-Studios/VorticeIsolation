@@ -10,24 +10,17 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <None Remove="effect.hlsl" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <EmbeddedResource Include="effect.hlsl">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </EmbeddedResource>
-  </ItemGroup>
-
-  <ItemGroup>
     <PackageReference Include="SharpGen.Runtime" Version="2.4.2-beta" />
-    <PackageReference Include="Vortice.Direct2D1" Version="3.7.5-beta" />
-    <PackageReference Include="Vortice.Direct3D11" Version="3.7.5-beta" />
-    <PackageReference Include="Vortice.Direct3D9" Version="3.7.5-beta" />
-    <PackageReference Include="Vortice.ShaderCompiler" Version="1.8.0" />
+    <PackageReference Include="Vortice.D3DCompiler" Version="3.8.2" />
+    <PackageReference Include="Vortice.Direct2D1" Version="3.8.2" />
+    <PackageReference Include="Vortice.Direct3D11" Version="3.8.2" />
+    <PackageReference Include="Vortice.Direct3D9" Version="3.8.2" />
   </ItemGroup>
 
   <ItemGroup>
+    <None Update="effect.hlsl">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
     <None Update="effect.ps">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>

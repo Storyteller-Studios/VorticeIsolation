@@ -7,6 +7,7 @@ using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
 using Vortice;
+using Vortice.D3DCompiler;
 using Vortice.Direct2D1;
 using Vortice.Direct3D11;
 using Vortice.Direct3D9;
@@ -34,7 +35,7 @@ namespace VorticeIsolation
 
         private bool _reLoading = false;
         private bool _startup = true;
-        private float multiplier = 0.5f;
+        private float multiplier = 1f;
 
         public MainWindow()
         {
@@ -49,8 +50,7 @@ namespace VorticeIsolation
             {
                 return;
             }
-            _effect?.SetValue(4, (float)Grid.ActualWidth * multiplier);
-            _effect?.SetValue(5, (float)Grid.ActualHeight * multiplier);
+            _effect?.SetValue(5, new Vector2((float)Grid.ActualWidth * multiplier, (float)Grid.ActualHeight * multiplier));
             InitializeDirectXSurface((uint)(Grid.ActualWidth * multiplier), (uint)(Grid.ActualHeight * multiplier));
         }
 
@@ -59,8 +59,7 @@ namespace VorticeIsolation
             _startup = true;
             InitializeDirectXDevice();
             InitializeDirectXSurface((uint)(Grid.ActualWidth * multiplier), (uint)(Grid.ActualHeight * multiplier));
-            _effect?.SetValue(4, (float)Grid.ActualWidth * multiplier);
-            _effect?.SetValue(5, (float)Grid.ActualHeight * multiplier);
+            _effect?.SetValue(5, new Vector2((float)Grid.ActualWidth * multiplier, (float)Grid.ActualHeight * multiplier));
             CompositionTarget.Rendering += CompositionTarget_Rendering;
             _startup = false;
         }
@@ -73,7 +72,7 @@ namespace VorticeIsolation
             }
             _d2DeviceContext.BeginDraw();
             _d2DeviceContext.Clear(null);
-            _effect.SetValue(3, (float)_stopwatch.Elapsed.TotalSeconds);
+            _effect.SetValue(3, (float)_stopwatch.Elapsed.TotalSeconds);             
             _d2DeviceContext.DrawImage(_effect);
             _d2DeviceContext.EndDraw();
             _d3D11Device.ImmediateContext.Flush();
@@ -97,7 +96,7 @@ namespace VorticeIsolation
             var presentParams = new Vortice.Direct3D9.PresentParameters();
 
             presentParams.Windowed = true;
-            presentParams.SwapEffect = Vortice.Direct3D9.SwapEffect.Flip;
+            presentParams.SwapEffect = Vortice.Direct3D9.SwapEffect.Discard;
             presentParams.DeviceWindowHandle = NativeMethods.GetDesktopWindow();
             presentParams.PresentationInterval = PresentInterval.Default;
             return presentParams;
@@ -139,7 +138,6 @@ namespace VorticeIsolation
             var id = context.CreateEffect(typeof(IsolationEffect).GUID);
             _effect?.Release();
             _effect = id.As<ID2D1Effect>();
-
             var presentParams = GetPresentParameters();
             var createFlags = CreateFlags.HardwareVertexProcessing | CreateFlags.Multithreaded |
                               CreateFlags.FpuPreserve;
@@ -235,27 +233,7 @@ public class IsolationEffect : CustomEffectBase, ID2D1DrawTransform
             drawInfo?.SetPixelShaderConstantBuffer(Buffer);
         }
     }
-    [CustomEffectProperty(PropertyType.Float, 4)]
-    public float Width
-    {
-        get => Buffer.Width;
-        set
-        {
-            Buffer.Width = value;
-            drawInfo?.SetPixelShaderConstantBuffer(Buffer);
-        }
-    }
-    [CustomEffectProperty(PropertyType.Float, 5)]
-    public float Height
-    {
-        get => Buffer.Height;
-        set
-        {
-            Buffer.Height = value;
-            drawInfo?.SetPixelShaderConstantBuffer(Buffer);
-        }
-    }
-    [CustomEffectProperty(PropertyType.Bool, 6)]
+    [CustomEffectProperty(PropertyType.Bool, 4)]
     public bool EnableLightWave
     {
         get => Buffer.EnableLightWave;
@@ -265,74 +243,76 @@ public class IsolationEffect : CustomEffectBase, ID2D1DrawTransform
             drawInfo?.SetPixelShaderConstantBuffer(Buffer);
         }
     }
-    [CustomEffectProperty(PropertyType.Vector3, 7)]
-    public Vector3 iResolution
+    [CustomEffectProperty(PropertyType.Vector2, 5)]
+    public Vector2 Resolution
     {
-        get => Buffer.iResolution;
+        get => Buffer.Resolution;
         set
         {
-            Buffer.iResolution = value;
+            Buffer.Resolution = value;
+            drawInfo?.SetPixelShaderConstantBuffer(Buffer);
+        }
+    }
+    [CustomEffectProperty(PropertyType.Vector3, 6)]
+    public Vector3 Color1
+    {
+        get => Buffer.Color1;
+        set
+        {
+            Buffer.Color1 = value;
+            drawInfo?.SetPixelShaderConstantBuffer(Buffer);
+        }
+    }
+    [CustomEffectProperty(PropertyType.Vector3, 7)]
+    public Vector3 Color2
+    {
+        get => Buffer.Color2;
+        set
+        {
+            Buffer.Color2 = value;
             drawInfo?.SetPixelShaderConstantBuffer(Buffer);
         }
     }
     [CustomEffectProperty(PropertyType.Vector3, 8)]
-    public Vector3 Color1
+    public Vector3 Color3
     {
-        get => Buffer.color1;
+        get => Buffer.Color3;
         set
         {
-            Buffer.color1 = value;
+            Buffer.Color3 = value;
             drawInfo?.SetPixelShaderConstantBuffer(Buffer);
         }
     }
     [CustomEffectProperty(PropertyType.Vector3, 9)]
-    public Vector3 Color2
-    {
-        get => Buffer.color2;
-        set
-        {
-            Buffer.color2 = value;
-            drawInfo?.SetPixelShaderConstantBuffer(Buffer);
-        }
-    }
-    [CustomEffectProperty(PropertyType.Vector3, 10)]
-    public Vector3 Color3
-    {
-        get => Buffer.color3;
-        set
-        {
-            Buffer.color3 = value;
-            drawInfo?.SetPixelShaderConstantBuffer(Buffer);
-        }
-    }
-    [CustomEffectProperty(PropertyType.Vector3, 11)]
     public Vector3 Color4
     {
-        get => Buffer.color4;
+        get => Buffer.Color4;
         set
         {
-            Buffer.color4 = value;
+            Buffer.Color4 = value;
             drawInfo?.SetPixelShaderConstantBuffer(Buffer);
         }
     }
+
     private IsolationEffectConstants Buffer = new()
     {
         RandomValue1 = 0f,
         RandomValue2 = 0f,
         RandomValue3 = 0f,
         iTime = 0f,
-        Width = 1280,
-        Height = 720,
-        EnableLightWave = true,
-        iResolution = new(1, 1, 1),
-        color1 = new(0.192f, 0.384f, 0.933f),
-        color2 = new(0.957f, 0.804f, 0.623f),
-        color3 = new(0.910f, 0.510f, 0.8f),
-        color4 = new(0.350f, 0.71f, 0.953f)
+        EnableLightWave = false,
+        UseHSVBlending = false,
+        Resolution = new(1280,720),
+        Color1 = new(0.192f, 0.384f, 0.933f),
+        Color2 = new(0.957f, 0.804f, 0.623f),
+        Color3 = new(0.910f, 0.510f, 0.8f),
+        Color4 = new(0.350f, 0.71f, 0.953f)
     };
 
     public override void Initialize(ID2D1EffectContext effectContext, ID2D1TransformGraph transformGraph)
     {
+        //var complieResult = Compiler.CompileFromFile("effect.hlsl", "main", "ps_4_0");
+        //File.WriteAllBytes("effect.ps", complieResult.Span);
         var data = File.ReadAllBytes("effect.ps");
         effectContext.LoadPixelShader(typeof(IsolationEffect).GUID, data, (uint)data.Length);
         transformGraph.SetSingleTransformNode(this);
@@ -341,18 +321,19 @@ public class IsolationEffect : CustomEffectBase, ID2D1DrawTransform
     [StructLayout(LayoutKind.Sequential)]
     public struct IsolationEffectConstants
     {
-        public Vector3 iResolution { get; set; }
-        public float RandomValue1 { get; set; }
-        public Vector3 color1 { get; set; }
-        public float RandomValue2 { get; set; }
-        public Vector3 color2 { get; set; }
-        public float RandomValue3 { get; set; }
-        public Vector3 color3 { get; set; }
-        public float iTime { get; set; }
-        public Vector3 color4 { get; set; }
-        public float Width { get; set; }
-        public float Height { get; set; }
-        public bool EnableLightWave { get; set; }
+        public Vector2 Resolution;
+        public float RandomValue1;
+        [MarshalAs(UnmanagedType.Bool)]
+        public bool UseHSVBlending;
+        public Vector3 Color1;
+        public float RandomValue2;
+        public Vector3 Color2;
+        public float RandomValue3;
+        public Vector3 Color3;
+        public float iTime;
+        public Vector3 Color4;
+        [MarshalAs(UnmanagedType.Bool)]
+        public bool EnableLightWave;
     }
 
     public void MapOutputRectToInputRects(RawRect outputRect, RawRect[] inputRects)
