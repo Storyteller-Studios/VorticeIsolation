@@ -1,17 +1,16 @@
-﻿using SharpGen.Runtime;
+﻿using ComputeSharp.D2D1.Interop;
+using SharpGen.Runtime;
 using System.Diagnostics;
-using System.IO;
-using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
 using Vortice;
-using Vortice.D3DCompiler;
 using Vortice.Direct2D1;
 using Vortice.Direct3D11;
 using Vortice.Direct3D9;
 using Vortice.DXGI;
+using VorticeIsolation.Effects;
 using Format = Vortice.DXGI.Format;
 
 namespace VorticeIsolation
@@ -29,57 +28,75 @@ namespace VorticeIsolation
         private ID3D11Device _d3D11Device;
         private IDirect3D9Ex _d3D9ContextEx;
         private IDirect3DDevice9Ex _d3D9DeviceEx;
-        private ID2D1Factory1 _factory;
         private ID2D1Effect _effect;
         private Stopwatch _stopwatch = Stopwatch.StartNew();
 
         private bool _reLoading = false;
         private bool _startup = true;
-        private float multiplier = 1f;
+        private float multiplier = 0.5f;
+        private float _width;
+        private float _height;
 
         public MainWindow()
         {
             InitializeComponent();
-            Loaded += MainWindow_Loaded;
-            SizeChanged += MainWindow_SizeChanged;
         }
 
         private void MainWindow_SizeChanged(object sender, SizeChangedEventArgs e)
         {
-            if (_startup) 
+            if (_startup)
             {
                 return;
             }
-            _effect?.SetValue(5, new Vector2((float)Grid.ActualWidth * multiplier, (float)Grid.ActualHeight * multiplier));
-            InitializeDirectXSurface((uint)(Grid.ActualWidth * multiplier), (uint)(Grid.ActualHeight * multiplier));
+            var dpi = GetDpi(this);
+            var width = DipToPixel((float)Grid.ActualWidth, (float)dpi.PixelsPerInchX);
+            var height = DipToPixel((float)Grid.ActualHeight, (float)dpi.PixelsPerInchY);
+            _width = width;
+            _height = height;
+            InitializeDirectXSurface((uint)(_width * multiplier), (uint)(_height * multiplier));
         }
 
         private void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
             _startup = true;
             InitializeDirectXDevice();
-            InitializeDirectXSurface((uint)(Grid.ActualWidth * multiplier), (uint)(Grid.ActualHeight * multiplier));
-            _effect?.SetValue(5, new Vector2((float)Grid.ActualWidth * multiplier, (float)Grid.ActualHeight * multiplier));
+            var dpi = GetDpi(this);
+            var width = DipToPixel((float)Grid.ActualWidth, (float)dpi.PixelsPerInchX);
+            var height = DipToPixel((float)Grid.ActualHeight, (float)dpi.PixelsPerInchY);
+            InitializeDirectXSurface((uint)(width * multiplier), (uint)(height * multiplier));
+            _width = width;
+            _height = height;
             CompositionTarget.Rendering += CompositionTarget_Rendering;
             _startup = false;
         }
 
         private void CompositionTarget_Rendering(object? sender, EventArgs e)
         {
-            if (_reLoading) 
+            if (_reLoading)
             {
                 return;
             }
             _d2DeviceContext.BeginDraw();
             _d2DeviceContext.Clear(null);
-            _effect.SetValue(3, (float)_stopwatch.Elapsed.TotalSeconds);             
+            var bufferArray = D2D1PixelShader.GetConstantBuffer(new IsolationEffect(
+            new float2(_width * multiplier, _height * multiplier),
+            (float)_stopwatch.Elapsed.TotalSeconds,
+            new(0.192f, 0.384f, 0.933f),
+            new(0.957f, 0.804f, 0.623f),
+            new(0.910f, 0.510f, 0.8f),
+            new(0.350f, 0.71f, 0.953f),
+            0f,
+            0f,
+            0f,
+            true,
+            true)).ToArray();
+            IsolationD2DEffect.Instance?.DrawInfo?.SetPixelShaderConstantBuffer(bufferArray);
             _d2DeviceContext.DrawImage(_effect);
             _d2DeviceContext.EndDraw();
             _d3D11Device.ImmediateContext.Flush();
             D3DImage.Lock();
-            D3DImage.AddDirtyRect(new Int32Rect(0, 0, (int)(Grid.ActualWidth * multiplier), (int)(Grid.ActualHeight * multiplier)));
+            D3DImage.AddDirtyRect(new Int32Rect(0, 0, (int)(_width * multiplier), (int)(_height * multiplier)));
             D3DImage.Unlock();
-
             Image.InvalidateVisual();
         }
 
@@ -116,7 +133,7 @@ namespace VorticeIsolation
                 D3DImage.Lock();
                 D3DImage.SetBackBuffer(D3DResourceType.IDirect3DSurface9, surface.NativePointer,
                     enableSoftwareFallback: true);
-                D3DImage.AddDirtyRect(new Int32Rect(0, 0, (int)(Grid.ActualWidth * multiplier), (int)(Grid.ActualHeight * multiplier)));
+                D3DImage.AddDirtyRect(new Int32Rect(0, 0, (int)(_width * multiplier), (int)(_height * multiplier)));
                 D3DImage.Unlock();
             }
         }
@@ -130,13 +147,13 @@ namespace VorticeIsolation
             IDXGIDevice dXGIDevice = device.QueryInterface<IDXGIDevice>();
 
             var d2dFactory = D2D1.D2D1CreateFactory<ID2D1Factory1>();
-            _factory = d2dFactory;
             var d2Device = d2dFactory.CreateDevice(dXGIDevice);
-            d2dFactory.RegisterEffect<IsolationEffect>();
+            d2dFactory.RegisterEffect<IsolationD2DEffect>();
             var context = d2Device.CreateDeviceContext();
             _d2DeviceContext = context;
-            var id = context.CreateEffect(typeof(IsolationEffect).GUID);
             _effect?.Release();
+            IsolationD2DEffect.OnEffectDestroyed();
+            var id = context.CreateEffect(typeof(IsolationD2DEffect).GUID);
             _effect = id.As<ID2D1Effect>();
             var presentParams = GetPresentParameters();
             var createFlags = CreateFlags.HardwareVertexProcessing | CreateFlags.Multithreaded |
@@ -177,6 +194,14 @@ namespace VorticeIsolation
             SetRenderTarget(_renderTarget);
             _reLoading = false;
         }
+        public static float DipToPixel(float dip, float dpi)
+        {
+            return dip * dpi / 96.0f;
+        }
+        public static DpiScale GetDpi(Visual visual)
+        {
+            return VisualTreeHelper.GetDpi(visual);
+        }
     }
 }
 
@@ -185,155 +210,22 @@ public static class NativeMethods
     [DllImport("user32.dll", SetLastError = false)]
     public static extern IntPtr GetDesktopWindow();
 }
-public class IsolationEffect : CustomEffectBase, ID2D1DrawTransform
+public class IsolationD2DEffect : CustomEffectBase, ID2D1DrawTransform
 {
-    public static readonly List<IsolationEffect> CurrentInstances = new();
-    public IsolationEffect()
-    {
-        CurrentInstances.Add(this);
-    }
-    private ID2D1DrawInfo? drawInfo;
-    [CustomEffectProperty(PropertyType.Float, 0)]
-    public float RandomValue1
-    {
-        get => Buffer.RandomValue1;
-        set
-        {
-            Buffer.RandomValue1 = value;
-            drawInfo?.SetPixelShaderConstantBuffer(Buffer);
-        }
-    }
-    [CustomEffectProperty(PropertyType.Float, 1)]
-    public float RandomValue2
-    {
-        get => Buffer.RandomValue2;
-        set
-        {
-            Buffer.RandomValue2 = value;
-            drawInfo?.SetPixelShaderConstantBuffer(Buffer);
-        }
-    }
-    [CustomEffectProperty(PropertyType.Float, 2)]
-    public float RandomValue3
-    {
-        get => Buffer.RandomValue3;
-        set
-        {
-            Buffer.RandomValue3 = value;
-            drawInfo?.SetPixelShaderConstantBuffer(Buffer);
-        }
-    }
-    [CustomEffectProperty(PropertyType.Float, 3)]
-    public float iTime
-    {
-        get => Buffer.iTime;
-        set
-        {
-            Buffer.iTime = value;
-            drawInfo?.SetPixelShaderConstantBuffer(Buffer);
-        }
-    }
-    [CustomEffectProperty(PropertyType.Bool, 4)]
-    public bool EnableLightWave
-    {
-        get => Buffer.EnableLightWave;
-        set
-        {
-            Buffer.EnableLightWave = value;
-            drawInfo?.SetPixelShaderConstantBuffer(Buffer);
-        }
-    }
-    [CustomEffectProperty(PropertyType.Vector2, 5)]
-    public Vector2 Resolution
-    {
-        get => Buffer.Resolution;
-        set
-        {
-            Buffer.Resolution = value;
-            drawInfo?.SetPixelShaderConstantBuffer(Buffer);
-        }
-    }
-    [CustomEffectProperty(PropertyType.Vector3, 6)]
-    public Vector3 Color1
-    {
-        get => Buffer.Color1;
-        set
-        {
-            Buffer.Color1 = value;
-            drawInfo?.SetPixelShaderConstantBuffer(Buffer);
-        }
-    }
-    [CustomEffectProperty(PropertyType.Vector3, 7)]
-    public Vector3 Color2
-    {
-        get => Buffer.Color2;
-        set
-        {
-            Buffer.Color2 = value;
-            drawInfo?.SetPixelShaderConstantBuffer(Buffer);
-        }
-    }
-    [CustomEffectProperty(PropertyType.Vector3, 8)]
-    public Vector3 Color3
-    {
-        get => Buffer.Color3;
-        set
-        {
-            Buffer.Color3 = value;
-            drawInfo?.SetPixelShaderConstantBuffer(Buffer);
-        }
-    }
-    [CustomEffectProperty(PropertyType.Vector3, 9)]
-    public Vector3 Color4
-    {
-        get => Buffer.Color4;
-        set
-        {
-            Buffer.Color4 = value;
-            drawInfo?.SetPixelShaderConstantBuffer(Buffer);
-        }
-    }
+    public static IsolationD2DEffect? Instance { get; private set; }
+    public ID2D1DrawInfo? DrawInfo { get; private set; }
 
-    private IsolationEffectConstants Buffer = new()
+    public IsolationD2DEffect()
     {
-        RandomValue1 = 0f,
-        RandomValue2 = 0f,
-        RandomValue3 = 0f,
-        iTime = 0f,
-        EnableLightWave = false,
-        UseHSVBlending = false,
-        Resolution = new(1280,720),
-        Color1 = new(0.192f, 0.384f, 0.933f),
-        Color2 = new(0.957f, 0.804f, 0.623f),
-        Color3 = new(0.910f, 0.510f, 0.8f),
-        Color4 = new(0.350f, 0.71f, 0.953f)
-    };
+        Instance = this;
+    }
 
     public override void Initialize(ID2D1EffectContext effectContext, ID2D1TransformGraph transformGraph)
     {
-        //var complieResult = Compiler.CompileFromFile("effect.hlsl", "main", "ps_4_0");
-        //File.WriteAllBytes("effect.ps", complieResult.Span);
-        var data = File.ReadAllBytes("effect.ps");
-        effectContext.LoadPixelShader(typeof(IsolationEffect).GUID, data, (uint)data.Length);
+        var bytecode = D2D1PixelShader.LoadBytecode<IsolationEffect>();
+        effectContext.LoadPixelShader(typeof(IsolationD2DEffect).GUID, bytecode.ToArray(), (uint)bytecode.Length);
         transformGraph.SetSingleTransformNode(this);
         base.Initialize(effectContext, transformGraph);
-    }
-    [StructLayout(LayoutKind.Sequential)]
-    public struct IsolationEffectConstants
-    {
-        public Vector2 Resolution;
-        public float RandomValue1;
-        [MarshalAs(UnmanagedType.Bool)]
-        public bool UseHSVBlending;
-        public Vector3 Color1;
-        public float RandomValue2;
-        public Vector3 Color2;
-        public float RandomValue3;
-        public Vector3 Color3;
-        public float iTime;
-        public Vector3 Color4;
-        [MarshalAs(UnmanagedType.Bool)]
-        public bool EnableLightWave;
     }
 
     public void MapOutputRectToInputRects(RawRect outputRect, RawRect[] inputRects)
@@ -359,7 +251,11 @@ public class IsolationEffect : CustomEffectBase, ID2D1DrawTransform
 
     public void SetDrawInfo(ID2D1DrawInfo drawInfo)
     {
-        drawInfo.SetPixelShader(typeof(IsolationEffect).GUID, PixelOptions.None);
-        this.drawInfo = drawInfo;
+        drawInfo.SetPixelShader(typeof(IsolationD2DEffect).GUID, PixelOptions.None);
+        DrawInfo = drawInfo;
+    }
+    public static void OnEffectDestroyed()
+    {
+        Instance = null;
     }
 }

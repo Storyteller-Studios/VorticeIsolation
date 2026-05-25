@@ -9,6 +9,8 @@
     Title="MainWindow"
     Width="1280"
     Height="720"
+    Loaded="MainWindow_Loaded"
+    SizeChanged="MainWindow_SizeChanged"
     mc:Ignorable="d">
     <Grid x:Name="Grid">
         <Image x:Name="Image">
